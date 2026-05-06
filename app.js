@@ -2,15 +2,82 @@
 
 // Global variables to share between carousel and grid gallery
 let currentCarouselIndex = 0;
+let currentFilter = 'all';
 let carouselItems = [];
+let visibleCarouselItems = [];
 let carouselElement = null;
 let itemCount = 0;
 
 // Global functions for carousel control
 function updateCarousel() {
-    if (!carouselElement) return;
+    if (!carouselElement || !visibleCarouselItems.length) return;
+    pauseAllMedia();
     carouselElement.style.transform = `translateX(-${currentCarouselIndex * 100}%)`;
     updateIndicators();
+    
+    // Show fullscreen button only on active slide
+    const activeItem = visibleCarouselItems[currentCarouselIndex];
+    carouselItems.forEach(item => {
+        const btn = item.querySelector('.fullscreen-btn');
+        if (btn) btn.style.display = item === activeItem ? 'block' : 'none';
+    });
+}
+
+function pauseAllMedia() {
+    if (!carouselItems.length) return;
+    carouselItems.forEach(item => {
+        const video = item.querySelector('video');
+        if (video && !video.paused) {
+            video.pause();
+        }
+    });
+}
+
+function getMediaSource(node) {
+    if (!node) return '';
+    if (node.tagName === 'IMG') return node.src;
+    if (node.tagName === 'VIDEO') {
+        if (node.currentSrc) return node.currentSrc;
+        const sourceElement = node.querySelector('source');
+        return sourceElement ? sourceElement.src : node.src || '';
+    }
+    if (node.tagName === 'SOURCE') return node.src;
+    return '';
+}
+
+function getFilterType(item) {
+    if (!item) return 'all';
+    if (item.tagName === 'IMG') return 'images';
+    if (item.tagName === 'VIDEO') return 'videos';
+    if (item.querySelector && item.querySelector('video')) return 'videos';
+    if (item.querySelector && item.querySelector('img')) return 'images';
+    return 'all';
+}
+
+function applyFilter(filter = currentFilter) {
+    currentFilter = filter;
+    const filterType = filter === 'all' ? 'all' : filter;
+
+    const gridItems = document.querySelectorAll('.gallery img, .gallery video');
+    gridItems.forEach((item) => {
+        const type = getFilterType(item);
+        const shouldShow = filterType === 'all' || type === filterType;
+        item.classList.toggle('hidden', !shouldShow);
+    });
+
+    carouselItems.forEach((item) => {
+        const type = getFilterType(item);
+        const shouldShow = filterType === 'all' || type === filterType;
+        item.classList.toggle('hidden', !shouldShow);
+    });
+
+    visibleCarouselItems = Array.from(carouselItems).filter(item => !item.classList.contains('hidden'));
+    itemCount = visibleCarouselItems.length;
+    if (currentCarouselIndex >= itemCount) {
+        currentCarouselIndex = 0;
+    }
+
+    updateCarousel();
 }
 
 function updateIndicators() {
@@ -18,17 +85,28 @@ function updateIndicators() {
     if (!indicatorsContainer) return;
 
     const indicators = indicatorsContainer.querySelectorAll('.indicator');
+    const totalVisibleSlides = visibleCarouselItems.length;
 
-    // Calculate the range of slides to show in indicators
+    if (!totalVisibleSlides) {
+        indicators.forEach((ind) => {
+            ind.style.display = 'none';
+            ind.classList.remove('active');
+            ind.setAttribute('aria-label', '');
+        });
+        return;
+    }
+
+    if (currentCarouselIndex >= totalVisibleSlides) {
+        currentCarouselIndex = 0;
+    }
+
     let startSlide = Math.max(0, currentCarouselIndex - 4);
-    let endSlide = Math.min(itemCount - 1, startSlide + 8);
+    let endSlide = Math.min(totalVisibleSlides - 1, startSlide + 8);
 
-    // Adjust start if we're near the end
     if (endSlide - startSlide < 8) {
         startSlide = Math.max(0, endSlide - 8);
     }
 
-    // Update each indicator
     indicators.forEach((ind, indicatorIndex) => {
         const slideIndex = startSlide + indicatorIndex;
         const isVisible = slideIndex <= endSlide;
@@ -36,12 +114,13 @@ function updateIndicators() {
 
         ind.style.display = isVisible ? 'block' : 'none';
         ind.classList.toggle('active', isActive);
-        ind.setAttribute('aria-label', isVisible ? `Go to image ${slideIndex + 1}` : '');
+        ind.setAttribute('aria-label', isVisible ? `Go to media ${slideIndex + 1}` : '');
     });
 }
 
 function goToSlide(index) {
-    currentCarouselIndex = index;
+    if (!visibleCarouselItems.length) return;
+    currentCarouselIndex = Math.max(0, Math.min(index, visibleCarouselItems.length - 1));
     updateCarousel();
 }
 
@@ -52,36 +131,43 @@ function initializeCarousel() {
     const nextBtn = document.getElementById('nextBtn');
     const indicatorsContainer = document.getElementById('indicators');
 
-    if (!carousel || !prevBtn || !nextBtn) return;
+    if (!carousel || !prevBtn || !nextBtn || !indicatorsContainer) return;
 
     carouselElement = carousel;
     carouselItems = carousel.querySelectorAll('.carousel-item');
-    itemCount = carouselItems.length;
     currentCarouselIndex = 0;
+
+    // Add fullscreen buttons to each carousel item
+    carouselItems.forEach(item => {
+        const btn = document.createElement('button');
+        btn.className = 'fullscreen-btn';
+        btn.setAttribute('aria-label', 'Enter Fullscreen');
+        btn.innerHTML = '⤢';
+        item.appendChild(btn);
+    });
 
     // Create 9 indicators for limited display
     const totalIndicators = 9;
     for (let i = 0; i < totalIndicators; i++) {
         const indicator = document.createElement('button');
         indicator.className = 'indicator';
-        indicator.setAttribute('aria-label', `Go to image`);
+        indicator.setAttribute('aria-label', `Go to media`);
         indicator.addEventListener('click', () => {
-            // Calculate which slide this indicator represents
             const indicatorIndex = getIndicatorSlideIndex(i);
-            if (indicatorIndex >= 0 && indicatorIndex < itemCount) {
+            if (indicatorIndex >= 0 && indicatorIndex < visibleCarouselItems.length) {
                 goToSlide(indicatorIndex);
             }
         });
         indicatorsContainer.appendChild(indicator);
     }
 
-    // Initialize indicators for the starting position
-    updateIndicators();
+    applyFilter('all');
 
     // Get the slide index for a given indicator position
     function getIndicatorSlideIndex(indicatorIndex) {
+        const totalVisibleSlides = visibleCarouselItems.length;
         let startSlide = Math.max(0, currentCarouselIndex - 4);
-        let endSlide = Math.min(itemCount - 1, startSlide + 8);
+        let endSlide = Math.min(totalVisibleSlides - 1, startSlide + 8);
 
         if (endSlide - startSlide < 8) {
             startSlide = Math.max(0, endSlide - 8);
@@ -92,13 +178,15 @@ function initializeCarousel() {
 
     // Next slide
     function nextSlide() {
-        currentCarouselIndex = (currentCarouselIndex + 1) % itemCount;
+        if (!visibleCarouselItems.length) return;
+        currentCarouselIndex = (currentCarouselIndex + 1) % visibleCarouselItems.length;
         updateCarousel();
     }
 
     // Previous slide
     function prevSlide() {
-        currentCarouselIndex = (currentCarouselIndex - 1 + itemCount) % itemCount;
+        if (!visibleCarouselItems.length) return;
+        currentCarouselIndex = (currentCarouselIndex - 1 + visibleCarouselItems.length) % visibleCarouselItems.length;
         updateCarousel();
     }
 
@@ -111,32 +199,90 @@ function initializeCarousel() {
         if (e.key === 'ArrowRight') nextSlide();
         if (e.key === 'ArrowLeft') prevSlide();
     });
+
+    // Fullscreen functionality
+    document.addEventListener('click', (e) => {
+        if (e.target.classList.contains('fullscreen-btn')) {
+            const item = e.target.closest('.carousel-item');
+            const media = item.querySelector('img, video');
+            if (media && document.fullscreenEnabled) {
+                media.requestFullscreen().catch(console.error);
+            }
+        }
+    });
+
+    // Handle fullscreen exit button
+    document.addEventListener('fullscreenchange', () => {
+        if (document.fullscreenElement) {
+            // Add exit button
+            const exitBtn = document.createElement('button');
+            exitBtn.className = 'fullscreen-exit-btn';
+            exitBtn.innerHTML = '✕';
+            exitBtn.style.position = 'fixed';
+            exitBtn.style.top = '10px';
+            exitBtn.style.right = '10px';
+            exitBtn.style.zIndex = '9999';
+            exitBtn.style.background = 'rgba(0, 0, 0, 0.5)';
+            exitBtn.style.color = 'white';
+            exitBtn.style.border = 'none';
+            exitBtn.style.width = '40px';
+            exitBtn.style.height = '40px';
+            exitBtn.style.borderRadius = '50%';
+            exitBtn.style.cursor = 'pointer';
+            exitBtn.style.fontSize = '18px';
+            exitBtn.style.display = 'flex';
+            exitBtn.style.alignItems = 'center';
+            exitBtn.style.justifyContent = 'center';
+            exitBtn.setAttribute('aria-label', 'Exit Fullscreen');
+            exitBtn.addEventListener('click', () => document.exitFullscreen());
+            document.body.appendChild(exitBtn);
+            window.fullscreenExitBtn = exitBtn;
+        } else {
+            // Remove exit button
+            if (window.fullscreenExitBtn) {
+                window.fullscreenExitBtn.remove();
+                window.fullscreenExitBtn = null;
+            }
+        }
+    });
+}
+
+function initializeGalleryFilter() {
+    const filterButtons = document.querySelectorAll('.filter-btn');
+    if (!filterButtons.length) return;
+
+    filterButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+            const filter = button.dataset.filter;
+            applyFilter(filter);
+            filterButtons.forEach(btn => btn.classList.toggle('active', btn === button));
+        });
+    });
 }
 
 // Grid Gallery Click to Update Carousel
 function initializeGridGallery() {
-    const gridImages = document.querySelectorAll('.gallery img');
+    const gridItems = document.querySelectorAll('.gallery img, .gallery video');
 
-    if (!gridImages.length || !carouselItems.length) return;
+    if (!gridItems.length || !carouselItems.length) return;
 
-    gridImages.forEach((gridImg) => {
-        gridImg.addEventListener('click', () => {
-            // Find the matching carousel image by src
-            const matchingCarouselIndex = Array.from(carouselItems).findIndex(carouselItem => {
-                const carouselImg = carouselItem.querySelector('img');
-                return carouselImg && carouselImg.src === gridImg.src;
+    gridItems.forEach((gridItem) => {
+        gridItem.addEventListener('click', () => {
+            const targetSource = getMediaSource(gridItem);
+            const matchingCarouselIndex = visibleCarouselItems.findIndex(carouselItem => {
+                const carouselImage = carouselItem.querySelector('img');
+                const carouselVideo = carouselItem.querySelector('video');
+                const carouselSource = carouselImage ? getMediaSource(carouselImage) : getMediaSource(carouselVideo);
+                return carouselSource === targetSource;
             });
 
             if (matchingCarouselIndex !== -1) {
-                // Update carousel to the matching slide
                 goToSlide(matchingCarouselIndex);
-                
-                // Scroll to the carousel container
                 const carouselContainer = document.querySelector('.carousel-container');
                 if (carouselContainer) {
-                    carouselContainer.scrollIntoView({ 
-                        behavior: 'smooth', 
-                        block: 'center' 
+                    carouselContainer.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'center'
                     });
                 }
             }
@@ -180,7 +326,7 @@ function initializeContactForm() {
         const emailBody = `${message}\n\nFrom: ${name} <${email}>`;
 
         // Create mailto link
-        const businessEmail = 'contact@ansbounce.com'; // Business email address
+        const businessEmail = 'ashtay743@gmail.com'; // Business email address
         const mailtoLink = `mailto:${businessEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
 
         // Open email client
@@ -196,6 +342,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (document.getElementById('galleryCarousel')) {
         initializeCarousel();
         initializeGridGallery();
+        initializeGalleryFilter();
     }
 
     if (document.querySelector('form')) {
